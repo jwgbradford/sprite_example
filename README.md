@@ -1,0 +1,1 @@
+An example programme using pygame and Sprites
