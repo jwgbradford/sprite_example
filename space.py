@@ -10,6 +10,7 @@ WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+YELLOW = (255, 255, 0)
 
 # set Classes
 class MyGame():
@@ -19,44 +20,51 @@ class MyGame():
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("My Game")
         self.clock = pygame.time.Clock()
-        self.star_field = pygame.sprite.Group()
+        self.all_sprites = pygame.sprite.Group()
         self.aliens = pygame.sprite.Group()
         self.players = pygame.sprite.Group()
-        self.lasers = pygame.sprite.Group()
-
-    def main_loop(self):
+        self.score = 0
+        self.font = pygame.font.Font(None, 30)
         self.add_star_field(400)
+        self.aliens_drop = False
         self.add_aliens(6, 4)
         self.add_player()
-        while True:
+        self.main_loop()
+
+    def main_loop(self):
+        self.playing = True
+        while self.playing:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    self.game_over()
+                    pygame.quit()
+                    raise SystemExit
             self.update()
+        self.game_over()
 
     def update(self):
-        self.aliens_drop = False
-        self.shoot = False
-        self.star_field.update()
-        self.aliens.update()
-        self.players.update()
-        if self.shoot:
-            self.shoot_laser()
-        self.lasers.update()
-        if self.aliens_drop:
-            for alien in self.aliens:
-                alien.row_end()
         self.screen.fill(BLACK)
-        self.star_field.draw(self.screen)
-        self.aliens.draw(self.screen)
-        self.players.draw(self.screen)
-        self.lasers.draw(self.screen)
+        self.all_sprites.update()
+        self.hit_check()
+        if self.aliens_drop:
+            self.aliens.row_end()
+        self.all_sprites.draw(self.screen)
+        self.display_score()
         pygame.display.update()
         self.clock.tick(60)
 
     def game_over(self):
-        pygame.quit()
-        raise SystemExit
+        waiting = True
+        while waiting:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    raise SystemExit
+            txt = self.font.render('Press x to exit', True, WHITE)
+            self.screen.blit(txt, (WIDTH / 2, 100))
+            txt = self.font.render('Press space to', True, WHITE)
+            self.screen.blit(txt, (WIDTH / 2, 120))
+            txt = self.font.render('play again', True, WHITE)
+            self.screen.blit(txt, (WIDTH / 2, 160))
 
     def add_star_field(self, number_of_stars):
         for _ in range(number_of_stars):
@@ -66,22 +74,40 @@ class MyGame():
         x = random.randint(0, WIDTH)
         y = random.randint(0, HEIGHT)
         star = Star(x, y)
-        star.add(self.star_field)
+        star.add(self.all_sprites)
 
     def add_aliens(self, aliens, rows):
         for row_index in range(rows):
             for column_index in range(aliens):
                 alien = Alien(20 + (column_index * 40), 20 + (row_index *40))
-                alien.add(self.aliens)
+                alien.add(self.aliens, self.all_sprites)
 
     def add_player(self):
-        player = Player()
-        player.add(self.players)
+        player = Player(self.screen )
+        player.add(self.players, self.all_sprites)
 
-    def shoot_laser(self):
-        x = self.players()
-        laser = laser(x)
-        laser.add(self.lasers)
+    def hit_check(self):
+        self.check_aliens()
+        self.check_player()
+
+    def check_aliens(self):
+        for player in self.players:
+            laser_beams = player.lasers
+            hit_aliens = pygame.sprite.groupcollide(self.aliens, laser_beams, True, True)
+            if len(hit_aliens) > 0:
+                self.score += 10
+
+    def check_player(self):
+        player_hit = pygame.sprite.groupcollide(self.players, self.aliens, False, False)
+        if len(player_hit) > 0:
+            self.aliens.empty()
+            self.players.empty()
+            self.playing = False
+
+    def display_score(self):
+        score_txt = str(self.score)
+        txt = self.font.render(score_txt, True, WHITE)
+        self.screen.blit(txt, (WIDTH / 2, 20))
 
 class GameObject(pygame.sprite.Sprite):
     def __init__(self, x, y, size, colour):
@@ -109,15 +135,18 @@ class Alien(GameObject):
     def update(self):
         self.rect.x += self.dx
         if self.rect.right >= WIDTH or self.rect.left <= 0:
-            my_game.aliens_drop = True
+            self.row_end()# = True
 
     def row_end(self):
         self.dx *= -1
         self.rect.y += 40
 
 class Player(GameObject):
-    def __init__(self):
+    def __init__(self, screen):
         super().__init__(WIDTH / 2, HEIGHT - 50, 25, BLUE)
+        self.screen = screen
+        self.lasers = pygame.sprite.Group()
+        self.shoot_timer = 20
 
     def update(self):
         keys = pygame.key.get_pressed()  #check pressed keys
@@ -125,9 +154,30 @@ class Player(GameObject):
             self.rect.x += 2
         elif keys[pygame.K_LEFT] and self.rect.left > 10:
             self.rect.x -= 2
-        elif keys[pygame.K_SPACE]:
-            my_game.shoot = True
+        if keys[pygame.K_SPACE] and self.shoot_timer == 0:
+            self.shoot_laser()
+            self.shoot_timer = 20
+        self.lasers.update()
+        self.lasers.draw(self.screen)
+        if self.shoot_timer > 0:
+            self.shoot_timer -= 1
+
+    def shoot_laser(self):
+        laser = Laser(self.rect.centerx, self.rect.top)
+        laser.add(self.lasers)
+
+class Laser(GameObject):
+    def __init__(self, x, y):
+        super().__init__(x, y, 1, YELLOW)
+        self.image = pygame.Surface((2, 6))
+        self.rect = self.image.get_rect()
+        self.rect.center = (x, y)
+        self.image.fill(YELLOW)
+
+    def update(self):
+        self.rect.y -= 2
+        if self.rect.bottom <= 0:
+            self.kill()
 
 if __name__ == "__main__":
     my_game = MyGame()
-    my_game.main_loop()
